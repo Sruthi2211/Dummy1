@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Stock Data Profiling POC</title>
+    <script src="https://cdn.sheetjs.com/xlsx-0.18.12/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/data-forge@1.9.0/build/data-forge.min.js"></script>
+</head>
+<body>
+    <input type="file" id="fileInput" accept=".xlsx, .xls" />
+    <button onclick="processFile()">Analyze</button>
+    <div id="results"></div>
+
+    <script>
+        function processFile() {
+            const file = document.getElementById('fileInput').files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const sheetName = workbook.SheetNames[0];
+                const sheet = workbook.Sheets[sheetName];
+                const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+                if (jsonData.length < 1) {
+                    alert("Empty file!");
+                    return;
+                }
+
+                const headers = jsonData[0];
+                const rows = jsonData.slice(1).map(row => {
+                    return headers.reduce((obj, header, idx) => {
+                        obj[header] = row[idx] ?? null; // Handle undefined as null
+                        return obj;
+                    }, {});
+                });
+
+                const df = new dataForge.DataFrame(rows);
+
+                // 1. Null/Empty Analysis
+                const nullReport = headers.reduce((acc, header) => {
+                    acc[header] = df.count(row => row[header] === null || row[header] === '');
+                    return acc;
+                }, {});
+
+                // 2. Data Type Validation
+                const typeReport = df.detectTypes().toArray().reduce((acc, col) => {
+                    acc[col.name] = col.type;
+                    return acc;
+                }, {});
+
+                // 3. Duplicate Detection (Modify columns as needed)
+                const COL1 = 'Symbol';  // Replace with actual column names
+                const COL2 = 'Date';
+                const duplicates = df.groupBy(row => `${row[COL1]}|${row[COL2]}`)
+                    .where(group => group.count() > 1)
+                    .selectMany(group => group.toArray())
+                    .toArray();
+
+                // Display Results
+                let output = `<h2>Profiling Results</h2>`;
+                
+                output += `<h3>Null/Empty Values:</h3><ul>`;
+                Object.entries(nullReport).forEach(([col, count]) => {
+                    output += `<li>${col}: ${count}</li>`;
+                });
+                output += `</ul>`;
+
+                output += `<h3>Inferred Data Types:</h3><ul>`;
+                Object.entries(typeReport).forEach(([col, type]) => {
+                    output += `<li>${col}: ${type}</li>`;
+                });
+                output += `</ul>`;
+
+                output += `<h3>Duplicates (${duplicates.length} entries):</h3><ul>`;
+                duplicates.forEach((row, i) => {
+                    output += `<li>Entry ${i + 1}: ${JSON.stringify(row)}</li>`;
+                });
+                output += `</ul>`;
+
+                document.getElementById('results').innerHTML = output;
+            };
+            reader.readAsArrayBuffer(file);
+        }
+    </script>
+</body>
+</html>
